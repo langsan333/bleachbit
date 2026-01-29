@@ -3,7 +3,7 @@
  *
  * 逻辑移植自 BleachBit (https://www.bleachbit.org)
  * - 文件列表：Shell 枚举回收站项，对目录递归子项（与 get_recycle_bin + children_in_directory 一致）
- * - 容量信息：SHQueryRecycleBin
+ * - 容量信息：与 BleachBit 一致 = 对 GetFileList() 中每条路径取“文件大小”并求和（见 doc/recycle-bin-capacity-flow.md）
  * - 清空：SHEmptyRecycleBin（无声音、无确认、无进度窗）
  *
  * 目标框架：.NET Framework 4.7.2
@@ -37,46 +37,8 @@ namespace RecycleBinWpfDemo
         private const int SHERB_NOPROGRESSUI = 0x00000002;
         private const int SHERB_NOSOUND = 0x00000004;
 
-        [StructLayout(LayoutKind.Sequential, Pack = 4)]
-        private struct SHQUERYRBINFO
-        {
-            public int cbSize;
-            public long i64Size;
-            public long i64NumItems;
-        }
-
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        private static extern int SHQueryRecycleBinW(string pszRootPath, ref SHQUERYRBINFO pSHQueryRBInfo);
-
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
         private static extern int SHEmptyRecycleBinW(IntPtr hwnd, string pszRootPath, uint dwFlags);
-
-        #endregion
-
-        #region P/Invoke (kernel32) - 枚举固定盘符，与 BleachBit get_fixed_drives 一致
-
-        private const int DRIVE_FIXED = 3;
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        private static extern uint GetLogicalDriveStrings(uint nBufferLength, [Out] System.Text.StringBuilder lpBuffer);
-
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        private static extern uint GetDriveType(string lpRootPathName);
-
-        /// <summary>
-        /// 枚举本地固定盘符（如 C:\、D:\），与 BleachBit Windows.get_fixed_drives 一致。
-        /// </summary>
-        private static IEnumerable<string> GetFixedDrives()
-        {
-            var sb = new System.Text.StringBuilder(260);
-            if (GetLogicalDriveStrings(260, sb) == 0) yield break;
-            string s = sb.ToString();
-            foreach (string drive in s.Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (GetDriveType(drive) == DRIVE_FIXED && System.IO.Directory.Exists(drive))
-                    yield return drive;
-            }
-        }
 
         #endregion
 
@@ -167,41 +129,42 @@ namespace RecycleBinWpfDemo
         }
 
         /// <summary>
-        /// 获取回收站容量信息（总字节数、项数）。
-        /// 对应 BleachBit empty_recycle_bin(path, really_delete=False) 使用的 SHQueryRecycleBin。
-        /// 当不指定盘符时，按各固定盘分别查询再求和，与 BleachBit 行为一致（传 null 时部分系统会返回 0，故按盘符汇总）。
+        /// 单路径大小（与 BleachBit FileUtilities.getsize 一致：文件取 Length，目录视为 0，异常则 0）。
         /// </summary>
-        /// <param name="driveRoot">指定盘符根路径（如 "C:\"）可只查该盘；传 null 或空表示所有回收站（按固定盘分别查询后求和）。</param>
-        /// <returns>容量信息；若调用失败则返回 BytesUsed=0, ItemCount=0。</returns>
+        private static long GetPathSize(string path)
+        {
+            try
+            {
+                if (System.IO.File.Exists(path))
+                    return new System.IO.FileInfo(path).Length;
+                if (System.IO.Directory.Exists(path))
+                    return 0; // BleachBit 下目录 getsize 常为 0 或异常，不参与累加
+                return 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// 获取回收站容量信息（总字节数、项数）。
+        /// 与 BleachBit 一致：容量 = 对 GetFileList() 中每条路径取“文件大小”并求和（见 doc/recycle-bin-capacity-flow.md），
+        /// 而非 SHQueryRecycleBin；项数 = 列表条数。
+        /// </summary>
+        /// <param name="driveRoot">保留参数，当前未使用；容量始终基于完整 GetFileList() 求和。</param>
+        /// <returns>容量信息。</returns>
         public static RecycleBinCapacityInfo GetCapacityInfo(string driveRoot = null)
         {
-            var result = new RecycleBinCapacityInfo { BytesUsed = 0, ItemCount = 0 };
-            var info = new SHQUERYRBINFO { cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO)) };
-
-            if (!string.IsNullOrEmpty(driveRoot))
+            var list = GetFileList();
+            long bytesUsed = 0;
+            foreach (string path in list)
+                bytesUsed += GetPathSize(path);
+            return new RecycleBinCapacityInfo
             {
-                int hr = SHQueryRecycleBinW(driveRoot, ref info);
-                if (hr == 0)
-                {
-                    result.BytesUsed = info.i64Size;
-                    result.ItemCount = info.i64NumItems;
-                }
-                return result;
-            }
-
-            // 所有盘：按固定盘分别查询再求和（与 BleachBit get_fixed_drives + 各盘 SHQueryRecycleBin 一致，避免传 null 返回 0）
-            foreach (string drive in GetFixedDrives())
-            {
-                info.i64Size = 0;
-                info.i64NumItems = 0;
-                info.cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO));
-                if (SHQueryRecycleBinW(drive, ref info) == 0)
-                {
-                    result.BytesUsed += info.i64Size;
-                    result.ItemCount += info.i64NumItems;
-                }
-            }
-            return result;
+                BytesUsed = bytesUsed,
+                ItemCount = list.Count
+            };
         }
 
         /// <summary>
