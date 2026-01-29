@@ -53,6 +53,30 @@ namespace YourNamespace
 
         #endregion
 
+        #region P/Invoke (kernel32) - 枚举固定盘符，与 BleachBit get_fixed_drives 一致
+
+        private const int DRIVE_FIXED = 3;
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint GetLogicalDriveStrings(uint nBufferLength, [Out] System.Text.StringBuilder lpBuffer);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint GetDriveType(string lpRootPathName);
+
+        private static IEnumerable<string> GetFixedDrives()
+        {
+            var sb = new System.Text.StringBuilder(260);
+            if (GetLogicalDriveStrings(260, sb) == 0) yield break;
+            string s = sb.ToString();
+            foreach (string drive in s.Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (GetDriveType(drive) == DRIVE_FIXED && System.IO.Directory.Exists(drive))
+                    yield return drive;
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// 获取回收站中所有文件/目录的路径列表。
         /// 行为与 BleachBit get_recycle_bin 一致：顶层项若为目录，先列出其下所有子项（文件+目录），再列该项本身。
@@ -141,22 +165,38 @@ namespace YourNamespace
 
         /// <summary>
         /// 获取回收站容量信息（总字节数、项数）。
-        /// 对应 BleachBit empty_recycle_bin(path, really_delete=False) 使用的 SHQueryRecycleBin。
+        /// 当不指定盘符时，按各固定盘分别查询再求和，与 BleachBit 行为一致（传 null 时部分系统会返回 0，故按盘符汇总）。
         /// </summary>
-        /// <param name="driveRoot">指定盘符根路径（如 "C:\"）可只查该盘；传 null 或空表示所有回收站。</param>
+        /// <param name="driveRoot">指定盘符根路径（如 "C:\"）可只查该盘；传 null 或空表示所有回收站（按固定盘分别查询后求和）。</param>
         /// <returns>容量信息；若调用失败则返回 BytesUsed=0, ItemCount=0。</returns>
         public static RecycleBinCapacityInfo GetCapacityInfo(string driveRoot = null)
         {
+            var result = new RecycleBinCapacityInfo { BytesUsed = 0, ItemCount = 0 };
             var info = new SHQUERYRBINFO { cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO)) };
-            string root = string.IsNullOrEmpty(driveRoot) ? null : driveRoot;
-            int hr = SHQueryRecycleBinW(root, ref info);
-            if (hr != 0)
-                return new RecycleBinCapacityInfo { BytesUsed = 0, ItemCount = 0 };
-            return new RecycleBinCapacityInfo
+
+            if (!string.IsNullOrEmpty(driveRoot))
             {
-                BytesUsed = info.i64Size,
-                ItemCount = info.i64NumItems
-            };
+                int hr = SHQueryRecycleBinW(driveRoot, ref info);
+                if (hr == 0)
+                {
+                    result.BytesUsed = info.i64Size;
+                    result.ItemCount = info.i64NumItems;
+                }
+                return result;
+            }
+
+            foreach (string drive in GetFixedDrives())
+            {
+                info.i64Size = 0;
+                info.i64NumItems = 0;
+                info.cbSize = Marshal.SizeOf(typeof(SHQUERYRBINFO));
+                if (SHQueryRecycleBinW(drive, ref info) == 0)
+                {
+                    result.BytesUsed += info.i64Size;
+                    result.ItemCount += info.i64NumItems;
+                }
+            }
+            return result;
         }
 
         /// <summary>
