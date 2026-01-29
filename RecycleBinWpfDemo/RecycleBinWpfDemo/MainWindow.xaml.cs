@@ -44,6 +44,12 @@ namespace RecycleBinWpfDemo
             }
         }
 
+        private void BtnBrowserCache_Click(object sender, RoutedEventArgs e)
+        {
+            var win = new BrowserCacheWindow();
+            win.Show();
+        }
+
         private void BtnEmpty_Click(object sender, RoutedEventArgs e)
         {
             var result = MessageBox.Show(

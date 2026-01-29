@@ -35,8 +35,10 @@
                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
                  ScrollViewer.VerticalScrollBarVisibility="Auto"/>
 
-        <!-- 清空 -->
+        <!-- 清空 / 其他 -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="BtnBrowserCache" Content="浏览器缓存演示 (BrowserCache)" Click="BtnBrowserCache_Click"
+                    Padding="12,8" Margin="0,0,8,0"/>
             <Button x:Name="BtnEmpty" Content="清空回收站 (EmptyRecycleBin)" Click="BtnEmpty_Click"
                     Padding="16,8" Background="#E74C3C" Foreground="White"/>
         </StackPanel>
