@@ -26,11 +26,14 @@ namespace RecycleBinWpfDemo
             }
         }
 
-        private void BtnRefreshList_Click(object sender, RoutedEventArgs e)
+        private async void BtnRefreshList_Click(object sender, RoutedEventArgs e)
         {
+            var btn = BtnRefreshList;
             try
             {
-                List<string> paths = RecycleBinHelper.GetFileList();
+                btn.IsEnabled = false;
+                TxtListHint.Text = "获取中…";
+                List<string> paths = await RecycleBinHelper.GetFileListAsync();
                 ListPaths.Items.Clear();
                 foreach (string p in paths)
                     ListPaths.Items.Add(p);
@@ -41,6 +44,10 @@ namespace RecycleBinWpfDemo
                 ListPaths.Items.Clear();
                 ListPaths.Items.Add("获取失败: " + ex.Message);
                 TxtListHint.Text = "获取失败";
+            }
+            finally
+            {
+                btn.IsEnabled = true;
             }
         }
 

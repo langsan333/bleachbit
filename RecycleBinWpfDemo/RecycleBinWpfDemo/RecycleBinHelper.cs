@@ -13,6 +13,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 
 namespace RecycleBinWpfDemo
 {
@@ -43,11 +44,25 @@ namespace RecycleBinWpfDemo
         #endregion
 
         /// <summary>
-        /// 获取回收站中所有文件/目录的路径列表。
+        /// 获取回收站中所有文件/目录的路径列表（同步）。
         /// 行为与 BleachBit get_recycle_bin 一致：顶层项若为目录，先列出其下所有子项（文件+目录），再列该项本身。
         /// </summary>
         /// <returns>所有项的完整路径列表（含 $Recycle.Bin 下的实际路径）</returns>
         public static List<string> GetFileList()
+        {
+            return GetFileListCore();
+        }
+
+        /// <summary>
+        /// 获取回收站中所有文件/目录的路径列表（异步，在线程池执行，不阻塞 UI）。
+        /// </summary>
+        /// <returns>所有项的完整路径列表（含 $Recycle.Bin 下的实际路径）</returns>
+        public static Task<List<string>> GetFileListAsync()
+        {
+            return Task.Run(() => GetFileListCore());
+        }
+
+        private static List<string> GetFileListCore()
         {
             var list = new List<string>();
             try
@@ -105,7 +120,8 @@ namespace RecycleBinWpfDemo
             }
             catch { }
 
-            if (isFolder)
+            // 仅当路径在文件系统中真实存在为目录时才递归子项，避免将 .zip 等压缩文件当作文件夹展开
+            if (isFolder && System.IO.Directory.Exists(path))
             {
                 try
                 {
